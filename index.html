@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- 加到主畫面後以全螢幕 App 方式開啟（iPhone 不支援網頁全螢幕 API，用這個替代） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="戰術板">
 <title>籃球戰術板</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -68,6 +73,11 @@
   }
   @media (hover: hover) { button:hover { background: #4a5566; } }
   button:active { background: #4a5566; }
+  .icon-btn { padding: 0; width: 40px; display: flex; align-items: center; justify-content: center; }
+  .icon-btn svg { width: 20px; height: 20px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-btn .fs-exit { display: none; }
+  body.is-fullscreen .icon-btn .fs-enter { display: none; }
+  body.is-fullscreen .icon-btn .fs-exit { display: block; }
   .actions { display: flex; gap: 8px; position: relative; flex: 0 0 auto; }
   button:disabled, select:disabled, input:disabled { opacity: .4; cursor: not-allowed; }
   .recorder {
@@ -186,6 +196,10 @@
 <header>
   <h1>🏀 籃球戰術板</h1>
   <div class="actions">
+    <button id="fsBtn" class="icon-btn" title="進入全螢幕" aria-label="進入全螢幕">
+      <svg class="fs-enter" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      <svg class="fs-exit" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+    </button>
     <details class="menu">
       <summary>📁 戰術 ▾</summary>
       <div class="panel library">
@@ -258,6 +272,8 @@
       </radialGradient>
     </defs>
 
+    <!-- world：整個球場與球員；橫向螢幕時整組旋轉成橫式 -->
+    <g id="world">
     <rect x="-20" y="-20" width="600" height="900" rx="10" fill="#7a4a24"/>
     <g transform="translate(560,0) rotate(90)">
     <!-- 木地板 -->
@@ -305,11 +321,14 @@
     </g>
 
     <g id="tokens"></g>
+    </g>
   </svg>
 </div>
 
 <script>
   const svg = document.getElementById('court');
+  const world = document.getElementById('world');
+  let rotated = false; // 是否以橫式顯示
   const layer = document.getElementById('tokens');
   const NS = 'http://www.w3.org/2000/svg';
 
@@ -383,7 +402,7 @@
     // 限制在可視範圍內
     t.x = Math.max(-5, Math.min(565, x));
     t.y = Math.max(half ? 425 : -5, Math.min(865, y));
-    t.el.setAttribute('transform', `translate(${t.x},${t.y})`);
+    t.el.setAttribute('transform', `translate(${t.x},${t.y})${rotated ? ' rotate(90)' : ''}`);
   }
 
   function toSvgPoint(evt) {
@@ -411,7 +430,7 @@
       if (playing) return; // 播放中不能拖曳
       // 先移到最上層，再捕捉指標（移動 DOM 節點會讓捕捉失效，造成卡頓）
       layer.appendChild(el);
-      inv = svg.getScreenCTM().inverse();
+      inv = world.getScreenCTM().inverse(); // 以 world 座標計算，旋轉時也正確
       const p = toPoint(e);
       offset = { x: p.x - tokens[id].x, y: p.y - tokens[id].y };
       try { el.setPointerCapture(e.pointerId); } catch (err) { /* 部分瀏覽器不支援，忽略 */ }
@@ -452,13 +471,63 @@
   let half = false;
   function setMode(isHalf) {
     half = isHalf;
-    svg.setAttribute('viewBox', half ? '-20 410 600 470' : '-20 -20 600 900');
     board.classList.toggle('half', half);
+    layout();
     modeBtn.textContent = half ? '切換全場' : '切換半場';
     // 半場時把位在上半場的項目拉回可視範圍
     Object.keys(tokens).forEach(id => place(id, tokens[id].x, tokens[id].y));
   }
   modeBtn.addEventListener('click', () => setMode(!half));
+
+  // ===== 橫豎屏：手機 / 平板橫拿時，全場改成橫式顯示 =====
+  // 內部座標永遠是直式；橫式只是把 world 整組旋轉 -90 度（進攻籃框在右側）
+  // 半場本身就是橫長形，所以半場不旋轉
+  const touchQuery = matchMedia('(hover: none) and (pointer: coarse)');
+  function layout() {
+    const isTouch = touchQuery.matches || window.FORCE_TOUCH === true;
+    const landscape = window.innerWidth > window.innerHeight;
+    rotated = isTouch && landscape && !half;
+    world.setAttribute('transform', rotated ? 'rotate(-90)' : '');
+    let vb;
+    if (rotated) vb = '-20 -580 900 600';
+    else vb = half ? '-20 410 600 470' : '-20 -20 600 900';
+    svg.setAttribute('viewBox', vb);
+    svg.setAttribute('preserveAspectRatio', rotated ? 'xMidYMid meet' : 'xMidYMin meet');
+    // 重新放置，讓球員號碼保持正向
+    Object.keys(tokens).forEach(id => place(id, tokens[id].x, tokens[id].y));
+  }
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', () => setTimeout(layout, 100));
+
+  // ===== 全螢幕 =====
+  const fsBtn = document.getElementById('fsBtn');
+  const root = document.documentElement;
+  const fsElement = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const fsSupported = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+  function updateFs() {
+    const on = !!fsElement();
+    document.body.classList.toggle('is-fullscreen', on);
+    fsBtn.title = on ? '退出全螢幕' : '進入全螢幕';
+    fsBtn.setAttribute('aria-label', fsBtn.title);
+    layout();
+  }
+  fsBtn.addEventListener('click', () => {
+    closeMenus();
+    if (!fsSupported) {
+      alert('這台裝置的瀏覽器不支援網頁全螢幕（例如 iPhone）。\n\n' +
+            '替代方式：在 Safari 點「分享」→「加入主畫面」，從主畫面圖示開啟就會以全螢幕顯示。');
+      return;
+    }
+    if (fsElement()) {
+      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    } else {
+      const req = root.requestFullscreen || root.webkitRequestFullscreen;
+      const r = req.call(root);
+      if (r && r.catch) r.catch(() => alert('無法進入全螢幕。'));
+    }
+  });
+  document.addEventListener('fullscreenchange', updateFs);
+  document.addEventListener('webkitfullscreenchange', updateFs);
 
   // ===== 戰術錄製 / 播放 =====
   const recBtn = document.getElementById('recBtn');
@@ -677,6 +746,7 @@
   recBtn.addEventListener('click', () => closeMenus());
 
   defaults.forEach(createToken);
+  layout();
 
   // 手機：阻止長按選取 / 系統選單，拖曳交給 pointer 事件處理
   svg.addEventListener('touchstart', e => { if (e.target.closest('.token')) e.preventDefault(); }, { passive: false });
