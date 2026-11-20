@@ -20,12 +20,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    height: 100vh;
-    height: 100dvh;           /* 手機瀏覽器扣掉網址列的實際高度 */
-    padding: 16px;
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
-    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    min-height: 100vh;
+    /* 邊距會避開 iPhone 的瀏海、狀態列與底部橫條（加到主畫面後內容會延伸到狀態列下方） */
+    --pad: 16px;
+    padding:
+      max(var(--pad), env(safe-area-inset-top))
+      max(var(--pad), env(safe-area-inset-right))
+      max(var(--pad), env(safe-area-inset-bottom))
+      max(var(--pad), env(safe-area-inset-left));
     overflow: hidden;
   }
   /* 手機長按不要觸發選取文字、複製選單、放大鏡 */
@@ -136,8 +138,9 @@
 
   /* 球場：填滿剩下的空間，SVG 自動等比例縮放置中 */
   .board {
-    flex: 1 1 0;
-    min-height: 0;
+    /* 高度由程式依實際可用空間計算（iPhone 主畫面模式下 CSS 高度不可靠） */
+    flex: 0 0 auto;
+    height: 60vh;
     width: 100%;
   }
   svg {
@@ -163,7 +166,7 @@
 
   /* 手機直向 */
   @media (max-width: 520px) {
-    body { padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    body { --pad: 10px; }
     header { margin-bottom: 8px; }
     h1 { font-size: 18px; }
     button, .menu > summary { padding: 8px 10px; font-size: 14px; }
@@ -177,7 +180,7 @@
 
   /* 手機橫向等矮螢幕：控制列放左側，球場放右側 */
   @media (orientation: landscape) and (max-height: 520px) {
-    body { flex-direction: row; align-items: stretch; gap: 12px; padding: 10px; }
+    body { flex-direction: row; align-items: flex-start; gap: 12px; --pad: 10px; }
     .controls { width: 210px; max-width: none; display: flex; flex-direction: column; }
     header { flex-direction: column; align-items: stretch; }
     h1 { font-size: 17px; }
@@ -188,6 +191,7 @@
     .recorder button { padding: 8px; font-size: 14px; }
     #recStatus { font-size: 13px; }
     .board { flex: 1 1 0; min-width: 0; }
+    .controls { max-height: 100%; overflow-y: auto; }
   }
 </style>
 </head>
@@ -483,9 +487,20 @@
   // 內部座標永遠是直式；橫式只是把 world 整組旋轉 -90 度（進攻籃框在右側）
   // 半場本身就是橫長形，所以半場不旋轉
   const touchQuery = matchMedia('(hover: none) and (pointer: coarse)');
+  // 依目前可見高度計算球場高度：可見高度 − 球場上緣位置 − 底部邊距
+  function fitBoard() {
+    const vv = window.visualViewport;
+    const vh = (vv && vv.height) || window.innerHeight || document.documentElement.clientHeight;
+    const top = board.getBoundingClientRect().top + window.scrollY;
+    const padBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
+    board.style.height = Math.max(220, Math.floor(vh - top - padBottom)) + 'px';
+  }
+
+  const landscapeQuery = matchMedia('(orientation: landscape)');
   function layout() {
+    fitBoard();
     const isTouch = touchQuery.matches || window.FORCE_TOUCH === true;
-    const landscape = window.innerWidth > window.innerHeight;
+    const landscape = landscapeQuery.matches;
     rotated = isTouch && landscape && !half;
     world.setAttribute('transform', rotated ? 'rotate(-90)' : '');
     let vb;
@@ -497,7 +512,10 @@
     Object.keys(tokens).forEach(id => place(id, tokens[id].x, tokens[id].y));
   }
   window.addEventListener('resize', layout);
-  window.addEventListener('orientationchange', () => setTimeout(layout, 100));
+  window.addEventListener('orientationchange', () => setTimeout(layout, 150));
+  if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+  window.addEventListener('pageshow', layout);
+  window.addEventListener('load', layout);
 
   // ===== 全螢幕 =====
   const fsBtn = document.getElementById('fsBtn');
@@ -747,6 +765,9 @@
 
   defaults.forEach(createToken);
   layout();
+  // 主畫面 App 啟動時尺寸可能稍後才確定，延遲再算一次
+  setTimeout(layout, 300);
+  setTimeout(layout, 1000);
 
   // 手機：阻止長按選取 / 系統選單，拖曳交給 pointer 事件處理
   svg.addEventListener('touchstart', e => { if (e.target.closest('.token')) e.preventDefault(); }, { passive: false });
