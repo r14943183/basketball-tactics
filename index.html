@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>籃球戰術板</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+    background: #1e2329;
+    color: #eee;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    height: 100dvh;           /* 手機瀏覽器扣掉網址列的實際高度 */
+    padding: 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  /* 手機長按不要觸發選取文字、複製選單、放大鏡 */
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  input[type=text] { -webkit-user-select: text; user-select: text; }
+  .notice {
+    width: 100%;
+    max-width: 600px;
+    background: #7c2d12;
+    border: 1px solid #f97316;
+    color: #fff;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    flex: 0 0 auto;
+  }
+  .controls { width: 100%; max-width: 600px; flex: 0 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: 22px; margin: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  button {
+    background: #3a4350;
+    color: #fff;
+    border: 1px solid #556070;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 15px;
+    cursor: pointer;
+    touch-action: manipulation;
+    white-space: nowrap;
+  }
+  @media (hover: hover) { button:hover { background: #4a5566; } }
+  button:active { background: #4a5566; }
+  .actions { display: flex; gap: 8px; position: relative; flex: 0 0 auto; }
+  button:disabled, select:disabled, input:disabled { opacity: .4; cursor: not-allowed; }
+  .recorder {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  #recBtn.on { background: #b91c1c; border-color: #ef4444; }
+
+  /* 下拉選單（面板對齊右側按鈕群，避免在手機上超出畫面） */
+  .menu > summary {
+    list-style: none;
+    background: #3a4350;
+    border: 1px solid #556070;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 15px;
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    touch-action: manipulation;
+  }
+  .menu > summary::-webkit-details-marker { display: none; }
+  .menu[open] > summary { background: #4a5566; }
+  @media (hover: hover) { .menu > summary:hover { background: #4a5566; } }
+  .panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 10;
+    width: min(280px, calc(100vw - 24px));
+    max-height: calc(100dvh - 90px);
+    overflow-y: auto;
+    background: #2a313a;
+    border: 1px solid #556070;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .panel h3 { margin: 0; font-size: 12px; color: #8b96a3; font-weight: normal; }
+  .panel .row { display: flex; gap: 6px; }
+  .panel .row > * { flex: 1; min-width: 0; }
+  .panel hr { border: 0; border-top: 1px solid #3d4652; margin: 2px 0; width: 100%; }
+  .panel button { padding: 9px 10px; font-size: 14px; }
+  .panel input[type=text], .panel select {
+    background: #1e2329; color: #fff; border: 1px solid #556070;
+    border-radius: 6px; padding: 8px; font-size: 14px;
+  }
+  #recStatus { font-size: 14px; color: #aab4c0; }
+  #recStatus.on { color: #f87171; }
+
+  /* 球場：填滿剩下的空間，SVG 自動等比例縮放置中 */
+  .board {
+    flex: 1 1 0;
+    min-height: 0;
+    width: 100%;
+  }
+  svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .lines { fill: none; stroke: #fff; stroke-width: 2; }
+  .token { cursor: grab; touch-action: none; }
+  .token * { pointer-events: none; }
+  .token .hit { pointer-events: all; }
+  .token.dragging { cursor: grabbing; }
+  .token text {
+    font-size: 18px;
+    font-weight: bold;
+    fill: #fff;
+    text-anchor: middle;
+    dominant-baseline: central;
+  }
+
+  /* 手機直向 */
+  @media (max-width: 520px) {
+    body { padding: 10px; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+    header { margin-bottom: 8px; }
+    h1 { font-size: 18px; }
+    button, .menu > summary { padding: 8px 10px; font-size: 14px; }
+    .actions { gap: 6px; }
+    .recorder { gap: 6px; margin-bottom: 8px; }
+    .recorder button { flex: 1 1 0; }
+    #recStatus { flex-basis: 100%; font-size: 13px; }
+    /* 16px 以上避免 iPhone 點輸入框時自動放大 */
+    .panel input[type=text], .panel select { font-size: 16px; }
+  }
+
+  /* 手機橫向等矮螢幕：控制列放左側，球場放右側 */
+  @media (orientation: landscape) and (max-height: 520px) {
+    body { flex-direction: row; align-items: stretch; gap: 12px; padding: 10px; }
+    .controls { width: 210px; max-width: none; display: flex; flex-direction: column; }
+    header { flex-direction: column; align-items: stretch; }
+    h1 { font-size: 17px; }
+    .actions > .menu { flex: 1; }
+    .menu > summary { text-align: center; padding: 8px; font-size: 14px; }
+    .panel { left: 0; right: auto; max-height: calc(100dvh - 70px); }
+    .recorder { flex-direction: column; align-items: stretch; }
+    .recorder button { padding: 8px; font-size: 14px; }
+    #recStatus { font-size: 13px; }
+    .board { flex: 1 1 0; min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="controls">
+<header>
+  <h1>🏀 籃球戰術板</h1>
+  <div class="actions">
+    <details class="menu">
+      <summary>📁 戰術 ▾</summary>
+      <div class="panel library">
+        <h3>儲存到這台瀏覽器</h3>
+        <div class="row">
+          <input id="nameInput" type="text" placeholder="戰術名稱" maxlength="40">
+          <button id="saveBtn" style="flex:0 0 auto">💾 儲存</button>
+        </div>
+        <select id="savedSel"><option value="">— 已儲存的戰術 —</option></select>
+        <div class="row">
+          <button id="loadBtn">載入</button>
+          <button id="deleteBtn">刪除</button>
+        </div>
+        <hr>
+        <h3>檔案</h3>
+        <div class="row">
+          <button id="exportBtn">⬇ 匯出</button>
+          <button id="importBtn">⬆ 匯入</button>
+        </div>
+        <input id="importFile" type="file" accept=".json,application/json" hidden>
+      </div>
+    </details>
+    <details class="menu">
+      <summary>⚙ 設定 ▾</summary>
+      <div class="panel">
+        <h3>場地</h3>
+        <button id="modeBtn">切換半場</button>
+        <h3>播放速度</h3>
+        <select id="speedSel">
+          <option value="1600">慢</option>
+          <option value="1000" selected>中</option>
+          <option value="600">快</option>
+        </select>
+        <hr>
+        <button id="resetBtn">重置位置</button>
+      </div>
+    </details>
+  </div>
+</header>
+
+<div class="recorder">
+  <button id="recBtn">● 開始錄製</button>
+  <button id="captureBtn" disabled>記錄此格</button>
+  <button id="playBtn" disabled>▶ 播放</button>
+  <span id="recStatus">尚未錄製</span>
+</div>
+</div>
+
+<!-- 若 JavaScript 無法執行（例如在檔案 App 的預覽畫面開啟），這段提示會留著 -->
+<div id="notice" class="notice">
+  ⚠ 目前的開啟方式無法執行互動功能（看不到球員、不能拖曳）。<br>
+  請用 Safari 或 Chrome 瀏覽器開啟這個網頁，不要用檔案 App、OneDrive 或 LINE 的預覽畫面。
+</div>
+<script>
+  // 任何程式錯誤都顯示在提示框，方便排查
+  window.addEventListener('error', function (e) {
+    var n = document.getElementById('notice');
+    if (n) { n.style.display = ''; n.textContent = '⚠ 程式錯誤：' + e.message; }
+  });
+</script>
+
+<div class="board">
+  <!-- 比例：1 英尺 = 10 單位；球場 86 x 56 英尺（縮短長度，讓三分線更靠近中線），外加 20 單位邊界 -->
+  <!-- 直式：寬 560（三分線底角離邊線 6 英尺）、高 860；球場圖形以橫式繪製後旋轉 90 度 -->
+  <svg id="court" viewBox="-20 -20 600 900" preserveAspectRatio="xMidYMin meet" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <radialGradient id="ballGrad" cx="35%" cy="35%" r="65%">
+        <stop offset="0%" stop-color="#ffb066"/>
+        <stop offset="100%" stop-color="#d9620b"/>
+      </radialGradient>
+    </defs>
+
+    <rect x="-20" y="-20" width="600" height="900" rx="10" fill="#7a4a24"/>
+    <g transform="translate(560,0) rotate(90)">
+    <!-- 木地板 -->
+    <rect x="0" y="0" width="860" height="560" fill="#d9a066"/>
+    <!-- 外框 & 中線 -->
+    <g class="lines">
+      <rect x="0" y="0" width="860" height="560"/>
+      <line x1="430" y1="0" x2="430" y2="560"/>
+    </g>
+    <!-- 以下圖形往內移 30 單位，讓兩側多出空間 -->
+    <g transform="translate(0,30)">
+    <!-- 禁區上色 -->
+    <rect x="0" y="170" width="190" height="160" fill="#b5713a"/>
+    <rect x="670" y="170" width="190" height="160" fill="#b5713a"/>
+
+    <g class="lines">
+      <!-- 中圈 -->
+      <circle cx="430" cy="250" r="60"/>
+      <circle cx="430" cy="250" r="20"/>
+
+      <!-- 左半場 -->
+      <rect x="0" y="170" width="190" height="160"/>
+      <!-- 罰球圈：禁區外實線、禁區內虛線 -->
+      <path d="M190 190 A60 60 0 0 1 190 310"/>
+      <path d="M190 190 A60 60 0 0 0 190 310" stroke-dasharray="10 8"/>
+      <line x1="0" y1="30" x2="129.5" y2="30"/>
+      <line x1="0" y1="470" x2="129.5" y2="470"/>
+      <path d="M129.5 30 A237.5 237.5 0 0 1 129.5 470"/>
+      <path d="M40 210 A40 40 0 0 1 40 290"/>
+      <line x1="30" y1="220" x2="30" y2="280" stroke-width="4"/>
+      <circle cx="40" cy="250" r="7.5" stroke="#ff5a1f" stroke-width="3"/>
+
+      <!-- 右半場 -->
+      <rect x="670" y="170" width="190" height="160"/>
+      <path d="M670 190 A60 60 0 0 0 670 310"/>
+      <path d="M670 190 A60 60 0 0 1 670 310" stroke-dasharray="10 8"/>
+      <line x1="860" y1="30" x2="730.5" y2="30"/>
+      <line x1="860" y1="470" x2="730.5" y2="470"/>
+      <path d="M730.5 30 A237.5 237.5 0 0 0 730.5 470"/>
+      <path d="M820 210 A40 40 0 0 0 820 290"/>
+      <line x1="830" y1="220" x2="830" y2="280" stroke-width="4"/>
+      <circle cx="820" cy="250" r="7.5" stroke="#ff5a1f" stroke-width="3"/>
+    </g>
+    </g>
+    </g>
+
+    <g id="tokens"></g>
+  </svg>
+</div>
+
+<script>
+  const svg = document.getElementById('court');
+  const layer = document.getElementById('tokens');
+  const NS = 'http://www.w3.org/2000/svg';
+
+  // 預設位置（直式座標，下方籃框在 (280, 820)）
+  // 藍隊進攻：三分線外 3 人（弧頂、左右 45 度），底線上方 2 人
+  // 紅隊防守：2-3 區域聯防
+  const defaults = [
+    { id: 'B1', team: 'blue', num: 1, x: 280, y: 540 },
+    { id: 'B2', team: 'blue', num: 2, x: 475, y: 625 },
+    { id: 'B3', team: 'blue', num: 3, x: 85,  y: 625 },
+    { id: 'B4', team: 'blue', num: 4, x: 530, y: 780 },
+    { id: 'B5', team: 'blue', num: 5, x: 30,  y: 780 },
+    { id: 'R1', team: 'red',  num: 1, x: 225, y: 632 },
+    { id: 'R2', team: 'red',  num: 2, x: 335, y: 632 },
+    { id: 'R3', team: 'red',  num: 3, x: 155, y: 760 },
+    { id: 'R4', team: 'red',  num: 4, x: 405, y: 760 },
+    { id: 'R5', team: 'red',  num: 5, x: 280, y: 780 },
+    { id: 'BALL', team: 'ball', x: 305, y: 523 },
+  ];
+
+  const colors = {
+    red:  { fill: '#d62828', stroke: '#fff' },
+    blue: { fill: '#1d4ed8', stroke: '#fff' },
+  };
+
+  const tokens = {};
+
+  function createToken(d) {
+    const g = document.createElementNS(NS, 'g');
+    g.classList.add('token');
+    g.dataset.id = d.id;
+
+    // 透明的感應區比外觀大，手機用手指比較好抓
+    const hit = document.createElementNS(NS, 'circle');
+    hit.classList.add('hit');
+    hit.setAttribute('r', d.team === 'ball' ? 34 : 36);
+    hit.setAttribute('fill', 'transparent');
+    g.appendChild(hit);
+
+    if (d.team === 'ball') {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r', 12);
+      c.setAttribute('fill', 'url(#ballGrad)');
+      c.setAttribute('stroke', '#3a1d05');
+      c.setAttribute('stroke-width', 1.5);
+      const l1 = document.createElementNS(NS, 'path');
+      l1.setAttribute('d', 'M-12 0 H12 M0 -12 V12 M-8.5 -8.5 Q0 0 -8.5 8.5 M8.5 -8.5 Q0 0 8.5 8.5');
+      l1.setAttribute('fill', 'none');
+      l1.setAttribute('stroke', '#3a1d05');
+      l1.setAttribute('stroke-width', 1.2);
+      l1.setAttribute('pointer-events', 'none');
+      g.append(c, l1);
+    } else {
+      const c = document.createElementNS(NS, 'circle');
+      c.setAttribute('r', 20);
+      c.setAttribute('fill', colors[d.team].fill);
+      c.setAttribute('stroke', colors[d.team].stroke);
+      c.setAttribute('stroke-width', 3);
+      const t = document.createElementNS(NS, 'text');
+      t.textContent = d.num;
+      g.append(c, t);
+    }
+    layer.appendChild(g);
+    tokens[d.id] = { el: g, x: d.x, y: d.y };
+    place(d.id, d.x, d.y);
+    enableDrag(g, d.id);
+  }
+
+  function place(id, x, y) {
+    const t = tokens[id];
+    // 限制在可視範圍內
+    t.x = Math.max(-5, Math.min(565, x));
+    t.y = Math.max(half ? 425 : -5, Math.min(865, y));
+    t.el.setAttribute('transform', `translate(${t.x},${t.y})`);
+  }
+
+  function toSvgPoint(evt) {
+    const pt = svg.createSVGPoint();
+    pt.x = evt.clientX;
+    pt.y = evt.clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  function enableDrag(el, id) {
+    let offset = null;
+    let inv = null;        // 拖曳開始時快取座標轉換矩陣
+    let pending = null;    // 等待下一個畫面更新的位置
+    let raf = 0;
+
+    const toPoint = e => {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      return pt.matrixTransform(inv);
+    };
+
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (playing) return; // 播放中不能拖曳
+      // 先移到最上層，再捕捉指標（移動 DOM 節點會讓捕捉失效，造成卡頓）
+      layer.appendChild(el);
+      inv = svg.getScreenCTM().inverse();
+      const p = toPoint(e);
+      offset = { x: p.x - tokens[id].x, y: p.y - tokens[id].y };
+      try { el.setPointerCapture(e.pointerId); } catch (err) { /* 部分瀏覽器不支援，忽略 */ }
+      el.classList.add('dragging');
+    });
+    el.addEventListener('pointermove', e => {
+      if (!offset) return;
+      const p = toPoint(e);
+      pending = { x: p.x - offset.x, y: p.y - offset.y };
+      if (!raf) {
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          if (pending) place(id, pending.x, pending.y);
+        });
+      }
+    });
+    const end = e => {
+      if (!offset) return;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      if (pending) place(id, pending.x, pending.y);
+      pending = null;
+      offset = null;
+      el.classList.remove('dragging');
+      if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    };
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }
+
+  function reset() {
+    defaults.forEach(d => place(d.id, d.x, d.y));
+    layer.appendChild(tokens.BALL.el); // 球保持在最上層
+  }
+
+  // 半場 / 全場切換：只改變可視範圍（下方半場 y 430–860）
+  const board = document.querySelector('.board');
+  const modeBtn = document.getElementById('modeBtn');
+  let half = false;
+  function setMode(isHalf) {
+    half = isHalf;
+    svg.setAttribute('viewBox', half ? '-20 410 600 470' : '-20 -20 600 900');
+    board.classList.toggle('half', half);
+    modeBtn.textContent = half ? '切換全場' : '切換半場';
+    // 半場時把位在上半場的項目拉回可視範圍
+    Object.keys(tokens).forEach(id => place(id, tokens[id].x, tokens[id].y));
+  }
+  modeBtn.addEventListener('click', () => setMode(!half));
+
+  // ===== 戰術錄製 / 播放 =====
+  const recBtn = document.getElementById('recBtn');
+  const captureBtn = document.getElementById('captureBtn');
+  const playBtn = document.getElementById('playBtn');
+  const speedSel = document.getElementById('speedSel');
+  const recStatus = document.getElementById('recStatus');
+  const resetBtn = document.getElementById('resetBtn');
+  let recording = false;
+  let playing = false;
+  let frames = [];
+
+  const snapshot = () => {
+    const s = {};
+    for (const id in tokens) s[id] = { x: tokens[id].x, y: tokens[id].y };
+    return s;
+  };
+
+  function updateUI() {
+    recBtn.textContent = recording ? '■ 結束錄製' : '● 開始錄製';
+    recBtn.classList.toggle('on', recording);
+    captureBtn.disabled = !recording || playing;
+    playBtn.disabled = recording || playing || frames.length < 2;
+    recBtn.disabled = playing;
+    resetBtn.disabled = playing;
+    document.querySelectorAll('.library button, .library select, .library input')
+      .forEach(el => { el.disabled = playing || recording; });
+    recStatus.classList.toggle('on', recording);
+    if (recording) recStatus.textContent = `錄製中：已記錄 ${frames.length} 格`;
+    else if (!playing) recStatus.textContent = frames.length ? `共 ${frames.length} 格` : '尚未錄製';
+  }
+
+  recBtn.addEventListener('click', () => {
+    if (!recording) {
+      frames = [snapshot()]; // 第 1 格 = 開始錄製時的站位
+      recording = true;
+    } else {
+      recording = false;
+    }
+    updateUI();
+  });
+
+  captureBtn.addEventListener('click', () => {
+    frames.push(snapshot());
+    updateUI();
+  });
+
+  const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+  function animate(from, to, duration) {
+    return new Promise(resolve => {
+      const start = performance.now();
+      const step = now => {
+        const t = Math.min(1, (now - start) / duration);
+        const k = ease(t);
+        for (const id in to) {
+          place(id, from[id].x + (to[id].x - from[id].x) * k,
+                    from[id].y + (to[id].y - from[id].y) * k);
+        }
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  playBtn.addEventListener('click', async () => {
+    if (frames.length < 2) return;
+    playing = true;
+    updateUI();
+    layer.appendChild(tokens.BALL.el);
+    // 先回到第 1 格
+    for (const id in frames[0]) place(id, frames[0][id].x, frames[0][id].y);
+    recStatus.textContent = `播放中：第 1 / ${frames.length} 格`;
+    await new Promise(r => setTimeout(r, 400));
+    for (let i = 1; i < frames.length; i++) {
+      recStatus.textContent = `播放中：第 ${i + 1} / ${frames.length} 格`;
+      await animate(frames[i - 1], frames[i], Number(speedSel.value));
+    }
+    playing = false;
+    updateUI();
+    recStatus.textContent = `播放完畢（共 ${frames.length} 格）`;
+  });
+
+  // ===== 儲存 / 載入 / 匯出 / 匯入 =====
+  const STORE_KEY = 'basketball-tactics-v1';
+  const nameInput = document.getElementById('nameInput');
+  const saveBtn = document.getElementById('saveBtn');
+  const savedSel = document.getElementById('savedSel');
+  const loadBtn = document.getElementById('loadBtn');
+  const deleteBtn = document.getElementById('deleteBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const importBtn = document.getElementById('importBtn');
+  const importFile = document.getElementById('importFile');
+
+  function readStore() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function writeStore(data) {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); return true; }
+    catch (e) { alert('瀏覽器無法儲存（可能是無痕模式），請改用「匯出檔案」。'); return false; }
+  }
+  function refreshSaved(selectName) {
+    const data = readStore();
+    savedSel.innerHTML = '<option value="">— 已儲存的戰術 —</option>';
+    Object.keys(data).sort().forEach(name => {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = `${name}（${data[name].frames.length} 格）`;
+      savedSel.appendChild(o);
+    });
+    if (selectName) savedSel.value = selectName;
+  }
+
+  // 目前的戰術：有錄製就用錄製的格數，沒有就存目前站位為 1 格
+  function currentTactic(name) {
+    return {
+      app: 'basketball-tactics',
+      version: 1,
+      name,
+      half,
+      savedAt: new Date().toISOString(),
+      frames: frames.length ? frames : [snapshot()],
+    };
+  }
+
+  function isValidTactic(t) {
+    return t && Array.isArray(t.frames) && t.frames.length > 0 &&
+      t.frames.every(f => defaults.every(d =>
+        f[d.id] && Number.isFinite(f[d.id].x) && Number.isFinite(f[d.id].y)));
+  }
+
+  function applyTactic(t) {
+    setMode(!!t.half);
+    frames = t.frames.map(f => {
+      const c = {};
+      defaults.forEach(d => { c[d.id] = { x: f[d.id].x, y: f[d.id].y }; });
+      return c;
+    });
+    for (const id in frames[0]) place(id, frames[0][id].x, frames[0][id].y);
+    layer.appendChild(tokens.BALL.el);
+    nameInput.value = t.name || '';
+    updateUI();
+    recStatus.textContent = `已載入「${t.name || '未命名'}」（共 ${frames.length} 格）`;
+  }
+
+  saveBtn.addEventListener('click', () => {
+    const name = nameInput.value.trim();
+    if (!name) { alert('請先輸入戰術名稱'); nameInput.focus(); return; }
+    const data = readStore();
+    if (data[name] && !confirm(`「${name}」已存在，要覆蓋嗎？`)) return;
+    data[name] = currentTactic(name);
+    if (writeStore(data)) {
+      refreshSaved(name);
+      recStatus.textContent = `已儲存「${name}」（${data[name].frames.length} 格）`;
+    }
+  });
+
+  loadBtn.addEventListener('click', () => {
+    const name = savedSel.value;
+    if (!name) { alert('請先選擇要載入的戰術'); return; }
+    const t = readStore()[name];
+    if (isValidTactic(t)) applyTactic(t);
+  });
+
+  deleteBtn.addEventListener('click', () => {
+    const name = savedSel.value;
+    if (!name) { alert('請先選擇要刪除的戰術'); return; }
+    if (!confirm(`確定要刪除「${name}」嗎？`)) return;
+    const data = readStore();
+    delete data[name];
+    writeStore(data);
+    refreshSaved();
+    recStatus.textContent = `已刪除「${name}」`;
+  });
+
+  exportBtn.addEventListener('click', () => {
+    const name = nameInput.value.trim() || '未命名戰術';
+    const t = currentTactic(name);
+    const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name.replace(/[\\/:*?"<>|]/g, '_')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    recStatus.textContent = `已匯出「${name}」（${t.frames.length} 格）`;
+  });
+
+  importBtn.addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', async () => {
+    const file = importFile.files[0];
+    importFile.value = '';
+    if (!file) return;
+    try {
+      const t = JSON.parse(await file.text());
+      if (!isValidTactic(t)) throw new Error('bad');
+      if (!t.name) t.name = file.name.replace(/\.json$/i, '');
+      applyTactic(t);
+    } catch (e) {
+      alert('檔案格式不正確，無法匯入。');
+    }
+  });
+
+  // ===== 下拉選單：點外面或執行動作後自動收起 =====
+  const menus = document.querySelectorAll('.menu');
+  const closeMenus = except => menus.forEach(m => { if (m !== except) m.open = false; });
+  menus.forEach(m => m.addEventListener('toggle', () => { if (m.open) closeMenus(m); }));
+  document.addEventListener('pointerdown', e => {
+    if (!e.target.closest('.menu')) closeMenus();
+  });
+  [modeBtn, resetBtn, loadBtn, exportBtn].forEach(b => b.addEventListener('click', () => closeMenus()));
+  importFile.addEventListener('change', () => closeMenus());
+  recBtn.addEventListener('click', () => closeMenus());
+
+  defaults.forEach(createToken);
+
+  // 手機：阻止長按選取 / 系統選單，拖曳交給 pointer 事件處理
+  svg.addEventListener('touchstart', e => { if (e.target.closest('.token')) e.preventDefault(); }, { passive: false });
+  svg.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('selectstart', e => {
+    if (!e.target.closest || !e.target.closest('input')) e.preventDefault();
+  });
+
+  // 程式順利執行完畢 → 移除「無法執行」提示
+  document.getElementById('notice').style.display = 'none';
+  resetBtn.addEventListener('click', reset);
+  refreshSaved();
+  updateUI();
+</script>
+</body>
+</html>
