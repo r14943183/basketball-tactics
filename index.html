@@ -11,7 +11,8 @@
 <title>籃球戰術板</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; }
+  /* 頁面固定為可見高度、不捲動（iPad Safari 的 100vh 比實際可見區域高，會讓頁面被捲掉上方一截） */
+  html { height: 100%; overflow: hidden; }
   body {
     margin: 0;
     font-family: "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
@@ -20,7 +21,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    min-height: 100vh;
+    height: 100%;
     /* 邊距會避開 iPhone 的瀏海、狀態列與底部橫條（加到主畫面後內容會延伸到狀態列下方） */
     --pad: 16px;
     padding:
@@ -491,7 +492,10 @@
   function fitBoard() {
     const vv = window.visualViewport;
     const vh = (vv && vv.height) || window.innerHeight || document.documentElement.clientHeight;
-    const top = board.getBoundingClientRect().top + window.scrollY;
+    // 整頁鎖定為可見高度，並確保捲回最上方
+    document.body.style.height = Math.floor(vh) + 'px';
+    if (window.scrollY || document.documentElement.scrollTop) window.scrollTo(0, 0);
+    const top = board.getBoundingClientRect().top;
     const padBottom = parseFloat(getComputedStyle(document.body).paddingBottom) || 0;
     board.style.height = Math.max(220, Math.floor(vh - top - padBottom)) + 'px';
   }
