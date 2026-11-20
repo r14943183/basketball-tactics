@@ -6,7 +6,8 @@
 <!-- 加到主畫面後以全螢幕 App 方式開啟（iPhone 不支援網頁全螢幕 API，用這個替代） -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- black：內容從狀態列下方開始，不會被狀態列（iPad 上還有一段模糊區）蓋住 -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="戰術板">
 <title>籃球戰術板</title>
 <style>
@@ -50,6 +51,10 @@
     line-height: 1.5;
     margin-bottom: 10px;
     flex: 0 0 auto;
+  }
+  /* 平板「加入主畫面」模式：iPadOS 會在頂端畫一段模糊區，多留一點上方空間 */
+  @media (display-mode: standalone) and (min-width: 700px) {
+    body { padding-top: calc(env(safe-area-inset-top) + 36px); }
   }
   .controls { width: 100%; max-width: 600px; flex: 0 0 auto; }
   header {
