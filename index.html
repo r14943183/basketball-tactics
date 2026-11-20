@@ -97,6 +97,15 @@
     margin-bottom: 12px;
   }
   #recBtn.on { background: #b91c1c; border-color: #ef4444; }
+  /* 播放控制：上一格 / 播放・暫停 / 下一格 */
+  .player { display: flex; gap: 4px; }
+  .player svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+  .player svg .solid { fill: #fff; stroke-width: 1.5; }
+  #playBtn { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  #playBtn svg { width: 16px; height: 16px; }
+  #playBtn .ic-pause { display: none; }
+  #playBtn.is-playing .ic-play { display: none; }
+  #playBtn.is-playing .ic-pause { display: block; }
 
   /* 下拉選單（面板對齊右側按鈕群，避免在手機上超出畫面） */
   .menu > summary {
@@ -179,7 +188,8 @@
     button, .menu > summary { padding: 8px 10px; font-size: 14px; }
     .actions { gap: 6px; }
     .recorder { gap: 6px; margin-bottom: 8px; }
-    .recorder button { flex: 1 1 0; }
+    .recorder > button { flex: 1 1 0; }
+    .player .icon-btn { width: 38px; }
     #recStatus { flex-basis: 100%; font-size: 13px; }
     /* 16px 以上避免 iPhone 點輸入框時自動放大 */
     .panel input[type=text], .panel select { font-size: 16px; }
@@ -196,6 +206,7 @@
     .panel { left: 0; right: auto; max-height: calc(100dvh - 70px); }
     .recorder { flex-direction: column; align-items: stretch; }
     .recorder button { padding: 8px; font-size: 14px; }
+    .player > * { flex: 1; }
     #recStatus { font-size: 13px; }
     .board { flex: 1 1 0; min-width: 0; }
     .controls { max-height: 100%; overflow-y: auto; }
@@ -254,7 +265,19 @@
 <div class="recorder">
   <button id="recBtn">● 開始錄製</button>
   <button id="captureBtn" disabled>記錄此格</button>
-  <button id="playBtn" disabled>▶ 播放</button>
+  <div class="player">
+    <button id="prevBtn" class="icon-btn" title="上一格" aria-label="上一格" disabled>
+      <svg viewBox="0 0 24 24"><path d="M6 5v14"/><path class="solid" d="M19 5l-10 7 10 7z"/></svg>
+    </button>
+    <button id="playBtn" disabled>
+      <svg class="ic-play" viewBox="0 0 24 24"><path class="solid" d="M7 5l12 7-12 7z"/></svg>
+      <svg class="ic-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+      <span id="playLabel">播放</span>
+    </button>
+    <button id="nextBtn" class="icon-btn" title="下一格" aria-label="下一格" disabled>
+      <svg viewBox="0 0 24 24"><path d="M18 5v14"/><path class="solid" d="M5 5l10 7-10 7z"/></svg>
+    </button>
+  </div>
   <span id="recStatus">尚未錄製</span>
 </div>
 </div>
@@ -438,7 +461,7 @@
 
     el.addEventListener('pointerdown', e => {
       e.preventDefault();
-      if (playing) return; // 播放中不能拖曳
+      if (playing || animating) return; // 播放 / 換格動畫中不能拖曳
       // 先移到最上層，再捕捉指標（移動 DOM 節點會讓捕捉失效，造成卡頓）
       layer.appendChild(el);
       inv = world.getScreenCTM().inverse(); // 以 world 座標計算，旋轉時也正確
@@ -561,12 +584,21 @@
   const recBtn = document.getElementById('recBtn');
   const captureBtn = document.getElementById('captureBtn');
   const playBtn = document.getElementById('playBtn');
+  const playLabel = document.getElementById('playLabel');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
   const speedSel = document.getElementById('speedSel');
   const recStatus = document.getElementById('recStatus');
   const resetBtn = document.getElementById('resetBtn');
   let recording = false;
-  let playing = false;
+  let playing = false;     // 自動播放中
+  let animating = false;   // 正在移動到某一格
   let frames = [];
+  let cur = 0;             // 目前停在第幾格（從 0 起算）
+  let animTarget = 0;      // 動畫要前往的格
+  let pausedAt = null;     // 暫停在兩格之間：{ to, progress }
+  let animToken = 0;       // 用來中斷進行中的動畫
+  let lastProgress = 0;
 
   const snapshot = () => {
     const s = {};
@@ -574,18 +606,33 @@
     return s;
   };
 
+  function statusText() {
+    const n = frames.length;
+    if (recording) return `錄製中：已記錄 ${n} 格`;
+    if (!n) return '尚未錄製';
+    if (playing) return `播放中：第 ${(animating ? animTarget : cur) + 1} / ${n} 格`;
+    if (pausedAt) return `已暫停：第 ${cur + 1} → ${pausedAt.to + 1} 格之間`;
+    if (animating) return `第 ${animTarget + 1} / ${n} 格`;
+    return n > 1 ? `第 ${cur + 1} / ${n} 格` : `共 ${n} 格`;
+  }
+
   function updateUI() {
+    const busy = playing || animating;
+    const canPlay = !recording && frames.length >= 2;
     recBtn.textContent = recording ? '■ 結束錄製' : '● 開始錄製';
     recBtn.classList.toggle('on', recording);
-    captureBtn.disabled = !recording || playing;
-    playBtn.disabled = recording || playing || frames.length < 2;
-    recBtn.disabled = playing;
-    resetBtn.disabled = playing;
+    captureBtn.disabled = !recording || busy;
+    playBtn.disabled = !canPlay;
+    prevBtn.disabled = !canPlay;
+    nextBtn.disabled = !canPlay;
+    playBtn.classList.toggle('is-playing', playing);
+    playLabel.textContent = playing ? '暫停' : (pausedAt ? '繼續' : '播放');
+    recBtn.disabled = busy;
+    resetBtn.disabled = busy;
     document.querySelectorAll('.library button, .library select, .library input')
-      .forEach(el => { el.disabled = playing || recording; });
+      .forEach(el => { el.disabled = busy || recording; });
     recStatus.classList.toggle('on', recording);
-    if (recording) recStatus.textContent = `錄製中：已記錄 ${frames.length} 格`;
-    else if (!playing) recStatus.textContent = frames.length ? `共 ${frames.length} 格` : '尚未錄製';
+    recStatus.textContent = statusText();
   }
 
   recBtn.addEventListener('click', () => {
@@ -595,50 +642,122 @@
     } else {
       recording = false;
     }
+    cur = frames.length - 1;
+    pausedAt = null;
     updateUI();
   });
 
   captureBtn.addEventListener('click', () => {
     frames.push(snapshot());
+    cur = frames.length - 1;
     updateUI();
   });
 
   const ease = t => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
-  function animate(from, to, duration) {
+  // 移動到第 i 格；startProgress > 0 代表從暫停的位置接著走
+  // 回傳 true = 走完，false = 中途被暫停或換格打斷
+  function animateTo(i, duration, startProgress = 0) {
+    const token = ++animToken;
+    const from = startProgress > 0 ? frames[cur] : snapshot();
+    const to = frames[i];
+    animTarget = i;
+    animating = true;
+    lastProgress = startProgress;
+    layer.appendChild(tokens.BALL.el);
+    updateUI();
     return new Promise(resolve => {
-      const start = performance.now();
+      const start = performance.now() - startProgress * duration;
       const step = now => {
-        const t = Math.min(1, (now - start) / duration);
+        if (token !== animToken) { resolve(false); return; }
+        const t = Math.min(1, Math.max(0, (now - start) / duration));
+        lastProgress = t;
         const k = ease(t);
         for (const id in to) {
           place(id, from[id].x + (to[id].x - from[id].x) * k,
                     from[id].y + (to[id].y - from[id].y) * k);
         }
-        if (t < 1) requestAnimationFrame(step);
-        else resolve();
+        if (t < 1) { requestAnimationFrame(step); return; }
+        animating = false;
+        cur = i;
+        pausedAt = null;
+        updateUI();
+        resolve(true);
       };
       requestAnimationFrame(step);
     });
   }
 
+  function stopAnimation() {
+    animToken++;
+    animating = false;
+  }
+
+  function snapTo(i) {
+    stopAnimation();
+    for (const id in frames[i]) place(id, frames[i][id].x, frames[i][id].y);
+    layer.appendChild(tokens.BALL.el);
+    cur = i;
+    pausedAt = null;
+  }
+
+  async function runPlay() {
+    while (playing && cur < frames.length - 1) {
+      const target = cur + 1;
+      const resume = pausedAt && pausedAt.to === target ? pausedAt.progress : 0;
+      const done = await animateTo(target, Number(speedSel.value), resume);
+      if (!done) return; // 被暫停或換格
+    }
+    if (playing) {
+      playing = false;
+      updateUI();
+      recStatus.textContent = `播放完畢（共 ${frames.length} 格）`;
+    }
+  }
+
+  function pause() {
+    if (!playing) return;
+    playing = false;
+    if (animating) {
+      pausedAt = { to: animTarget, progress: lastProgress };
+      stopAnimation();
+    }
+    updateUI();
+  }
+
   playBtn.addEventListener('click', async () => {
     if (frames.length < 2) return;
+    if (playing) { pause(); return; }
+    // 已經在最後一格（且不是暫停中）→ 從第 1 格重新播放
+    if (!pausedAt && !animating && cur >= frames.length - 1) {
+      snapTo(0);
+      playing = true;
+      updateUI();
+      await new Promise(r => setTimeout(r, 400));
+      if (!playing) return;
+    }
+    if (animating) stopAnimation(); // 換格動畫中按播放 → 從目前位置接著播
     playing = true;
     updateUI();
-    layer.appendChild(tokens.BALL.el);
-    // 先回到第 1 格
-    for (const id in frames[0]) place(id, frames[0][id].x, frames[0][id].y);
-    recStatus.textContent = `播放中：第 1 / ${frames.length} 格`;
-    await new Promise(r => setTimeout(r, 400));
-    for (let i = 1; i < frames.length; i++) {
-      recStatus.textContent = `播放中：第 ${i + 1} / ${frames.length} 格`;
-      await animate(frames[i - 1], frames[i], Number(speedSel.value));
-    }
-    playing = false;
-    updateUI();
-    recStatus.textContent = `播放完畢（共 ${frames.length} 格）`;
+    runPlay();
   });
+
+  // 上一格 / 下一格：會先暫停，再移動到相鄰的格
+  function stepFrame(dir) {
+    if (frames.length < 2) return;
+    const wasPlaying = playing;
+    pause();
+    let target;
+    if (pausedAt) target = dir > 0 ? pausedAt.to : cur;          // 停在兩格之間
+    else if (animating && !wasPlaying) target = animTarget + dir; // 連續快速按
+    else target = cur + dir;
+    target = Math.max(0, Math.min(frames.length - 1, target));
+    pausedAt = null;
+    stopAnimation();
+    animateTo(target, 350);
+  }
+  prevBtn.addEventListener('click', () => stepFrame(-1));
+  nextBtn.addEventListener('click', () => stepFrame(1));
 
   // ===== 儲存 / 載入 / 匯出 / 匯入 =====
   const STORE_KEY = 'basketball-tactics-v1';
@@ -696,8 +815,8 @@
       defaults.forEach(d => { c[d.id] = { x: f[d.id].x, y: f[d.id].y }; });
       return c;
     });
-    for (const id in frames[0]) place(id, frames[0][id].x, frames[0][id].y);
-    layer.appendChild(tokens.BALL.el);
+    pause();
+    snapTo(0);
     nameInput.value = t.name || '';
     updateUI();
     recStatus.textContent = `已載入「${t.name || '未命名'}」（共 ${frames.length} 格）`;
